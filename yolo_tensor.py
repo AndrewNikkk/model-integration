@@ -73,6 +73,17 @@ class KeypointsAccsessor:
         return self._parent._keypoints_data[..., 2]
 
 
+class MasksAccsessor:
+    '''Аксессор для доступа к masks'''
+
+    __slots__ = ('parent')
+    def __init__(self, parent):
+        self.parent = parent
+
+    @property
+    def xy(self):
+        return self.parent._masks_data[..., :2]
+
 class YOLOBaseOut:
     
     def __init__(self, data, orig_shape):
@@ -162,3 +173,41 @@ class YOLOPoseOut(YOLOBaseOut):
             return cls(data=data, orig_shape=orig_shape, keypoints_data=kp)
 
 
+class YOLOSegOut(YOLOBaseOut):
+    def __init__(self, data, orig_shape, masks=None):
+        super().__init__(data, orig_shape)
+        if masks is None:
+            n = len(self.data)
+            self._masks_data = np.zeros((n, orig_shape[0], orig_shape[1]), dtype=np.float32)
+        else:
+            masks = np.asarray(masks, dtype=np.float32)
+            if masks.ndim != 3 or masks.shape[0] != len(self.data):
+                raise ValueError(f"masks must be (N, orig_shape[0], orig_shape[1]), got {masks.shape}, N={len(self.data)}")
+            self._masks_data = masks
+
+    @classmethod
+    def from_columns(cls, xyxy, ids, confs, classes, masks, orig_shape):
+        xyxy = np.asarray(xyxy, dtype=np.float32).reshape(-1, 4)
+        ids = np.asarray(ids, dtype=np.float32).ravel()
+        confs = np.asarray(confs, dtype=np.float32).ravel()
+        classes = np.asarray(classes, dtype=np.float32).ravel()
+        masks = np.asarray(masks, dtype=np.float32).ravel()
+
+        n = xyxy.shape[0]
+        if len(ids) != n or len(confs) != n or len(classes) != n:
+            raise ValueError("Lengths of xyxy/ids/confs/classes must match")
+
+        data = np.empty((n, 7), dtype=np.float32)
+        data[:, :4] = xyxy
+        data[:, 4] = ids
+        data[:, 5] = confs
+        data[:, 6] = classes
+        return cls(data=data, orig_shape=orig_shape)
+
+    @property
+    def ids(self):
+        return self.data[:, 4].astype(int)
+    
+    @property
+    def confs(self):
+        return self.data[:, 5]

@@ -6,7 +6,7 @@ from yolo_tensor import YOLOBaseOut, YOLOPoseOut
 
 class AdapterMixin(ABC):
     @abstractmethod
-    def get_output(self, frame: np.ndarray) -> Tuple[List[List[float]], List[int], List[int]]:
+    def get_output(self, frame: np.ndarray) -> Tuple[List[List[float]] | None, List[int] | None, List[int] | None]:
         pass
 
     def get_output_tensor(self, frame: np.ndarray) -> YOLOBaseOut | YOLOPoseOut:
@@ -24,7 +24,6 @@ class YOLOAdapter(AdapterMixin):
         self.iou_thres = iou
         self.device = device
         self.mode = 'predict'
-        self.img_shape = None
 
 
     def _run_inference(self, frame):
@@ -40,36 +39,42 @@ class YOLOAdapter(AdapterMixin):
                 persist=True,
                 verbose=False
             )
-            
-
-    def get_output_tensor(self, frame) -> YOLOBaseOut:
-        results = self._run_inference(frame=frame)
-
-        self.img_shape = frame.shape[:2]
-
-        if results and results[0].boxes is not None:
-            data = results[0].boxes.data.cpu().numpy()
-            return YOLOBaseOut(data=data, orig_shape=self.img_shape)
-        else:
-            return YOLOBaseOut(data=None, orig_shape=self.img_shape)
         
 
     def get_output(self, frame):
         results = self._run_inference(frame=frame)
 
-        self.img_shape = frame.shape[:2]
-
         if results and results[0].boxes is not None:
             boxes = results[0].boxes
 
-            bboxes = boxes.xyxy.cpu().numpy().tolist()
+            bboxes = boxes.xyxy.cpu().numpy().astype(np.int32).tolist()
             classes = boxes.cls.cpu().numpy().astype(np.int32).tolist()
             ids = boxes.id.cpu().numpy().astype(np.int32).tolist() if boxes.is_track else None
 
             return bboxes, classes, ids
         
         else:
-            return [], [], []
+            return None, None, None
+
+
+    def get_output_tensor(self, frame) -> YOLOBaseOut:
+        results = self._run_inference(frame)
+        img_shape = frame.shape[:2]
+
+        if results and results[0].boxes is not None:
+            boxes = results[0].boxes.cpu()
+            
+            if boxes.is_track:
+                data = boxes.data.cpu().numpy()
+                return YOLOBaseOut(data=data, orig_shape=img_shape)
+            else:
+                bboxes = boxes.xyxy
+                classes = boxes.cls
+                confs = boxes.conf
+                ids = np.asarray([-1]*len(bboxes))
+                return YOLOBaseOut.from_columns(xyxy=bboxes, ids=ids, confs=confs, classes=classes, orig_shape=img_shape)
+
+        return YOLOBaseOut(data=None, orig_shape=img_shape)
 
             
     def set_mode(self, mode):
